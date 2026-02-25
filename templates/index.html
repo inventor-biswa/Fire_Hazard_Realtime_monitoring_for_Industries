@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🔥 Fire Detection Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+
+  <!-- ===== TRUE FIRE ALERT BANNER ===== -->
+  <div id="alert-banner">
+    <span class="alert-siren">🚨</span>
+    <span id="alert-text">⚠️ TRUE FIRE DETECTED!</span>
+    <button id="alert-close">✕</button>
+  </div>
+
+  <!-- ===== HEADER ===== -->
+  <header class="header">
+    <div class="header-icon">🔥</div>
+    <div>
+      <h1>Fire Hazard Detection System</h1>
+      <p>YOLOv12 · Real-time · MCA Final Year Project 2026</p>
+    </div>
+    <div class="header-stats">
+      <div class="hstat"><span id="h-uptime">00:00:00</span><small>Uptime</small></div>
+      <div class="hstat"><span id="h-frames">0</span><small>Frames</small></div>
+      <div class="hstat fire"><span id="h-fire">0</span><small>🔥 Fire</small></div>
+      <div class="hstat smoke"><span id="h-smoke">0</span><small>💨 Smoke</small></div>
+      <div class="hstat alert-stat"><span id="h-alerts">0</span><small>Alerts</small></div>
+    </div>
+    <div class="status-dot">
+      <div class="dot"></div>System Active
+    </div>
+  </header>
+
+  <!-- ===== TABS ===== -->
+  <div class="tabs-wrapper">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="tab-live">🔴 Live</button>
+      <button class="tab-btn" data-tab="tab-dashboard">📊 Dashboard</button>
+      <button class="tab-btn" data-tab="tab-image">🖼️ Image</button>
+      <button class="tab-btn" data-tab="tab-video">🎬 Video</button>
+      <button class="tab-btn" data-tab="tab-settings">⚙️ Settings</button>
+    </div>
+
+    <!-- ========== LIVE TAB ========== -->
+    <div class="tab-panel active" id="tab-live">
+      <div class="live-grid">
+        <div class="stream-card">
+          <div class="stream-overlay">
+            <div class="live-dot"></div>LIVE
+          </div>
+          <img src="/video_feed" alt="Live Feed" id="live-feed" />
+          <div class="stream-bottom">
+            <button class="btn-snap" id="snap-btn">📸 Snapshot</button>
+            <div id="snap-result"></div>
+          </div>
+        </div>
+        <div class="alert-panel">
+          <div class="info-card">
+            <h3>🔥 Fire Detection Timer</h3>
+            <div class="timer-ring-wrap">
+              <svg width="110" height="110" viewBox="0 0 110 110" class="ring-svg">
+                <defs>
+                  <linearGradient id="fireGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#ff4500" />
+                    <stop offset="100%" stop-color="#ffa500" />
+                  </linearGradient>
+                </defs>
+                <circle cx="55" cy="55" r="45" class="ring-bg" />
+                <circle cx="55" cy="55" r="45" class="ring-fill" id="ring-fill" />
+              </svg>
+              <div class="ring-label" id="ring-label">0.0s</div>
+              <div class="ring-sublabel" id="ring-threshold">Alert at 10s</div>
+            </div>
+          </div>
+          <div class="info-card">
+            <h3>⚙️ Alert Logic</h3>
+            <div class="logic-list">
+              <p>🔍 Every frame is analyzed by YOLOv12</p>
+              <p>⏱️ Continuous detection tracked in real-time</p>
+              <p>🚨 TRUE FIRE after <strong id="logic-seconds">10</strong> continuous seconds</p>
+              <p>✅ Alert auto-resets when fire disappears</p>
+            </div>
+          </div>
+          <div class="info-card">
+            <h3>📋 Recent Detections</h3>
+            <div class="detection-log" id="mini-log">
+              <div class="log-empty">Waiting for detections...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== DASHBOARD TAB ========== -->
+    <div class="tab-panel" id="tab-dashboard">
+      <!-- Charts row -->
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>📈 Confidence Over Time</h3>
+          <canvas id="conf-chart" height="200"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>🏷️ Detection Breakdown</h3>
+          <canvas id="breakdown-chart" height="200"></canvas>
+        </div>
+      </div>
+
+      <!-- Alert History -->
+      <div class="section-card">
+        <div class="section-header">
+          <h3>🚨 Alert History</h3>
+          <span id="alert-count-badge" class="badge badge-danger">0 alerts</span>
+        </div>
+        <div class="alert-history-list" id="alert-history">
+          <div class="log-empty">No alerts triggered yet.</div>
+        </div>
+      </div>
+
+      <!-- Detection Log -->
+      <div class="section-card">
+        <div class="section-header">
+          <h3>📋 Full Detection Log</h3>
+          <a href="/export_log" class="btn-outline" download>⬇️ Export CSV</a>
+        </div>
+        <div class="log-table-wrap">
+          <table class="log-table" id="log-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Source</th>
+                <th>Class</th>
+                <th>Confidence</th>
+              </tr>
+            </thead>
+            <tbody id="log-tbody">
+              <tr>
+                <td colspan="4" class="log-empty">No detections yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== IMAGE TAB ========== -->
+    <div class="tab-panel" id="tab-image">
+      <div class="upload-area" id="image-drop">
+        <div class="upload-icon">🖼️</div>
+        <h3>Upload an Image</h3>
+        <p>JPG, PNG, WEBP · Click or drag & drop</p>
+        <p id="image-preview" class="file-name"></p>
+        <input type="file" id="image-input" accept="image/*" />
+      </div>
+      <div style="text-align:center">
+        <button class="btn-primary" id="image-btn" disabled>🔍 Analyze Image</button>
+      </div>
+      <div class="loading" id="image-loading">
+        <div class="spinner"></div>Running AI detection...
+      </div>
+      <div class="result-area" id="image-result">
+        <h3 class="result-title">📊 Detection Result</h3>
+        <div class="result-grid">
+          <img id="result-img" src="" alt="Annotated result" />
+          <div>
+            <p class="sub-label">DETECTED OBJECTS</p>
+            <div id="detection-pills"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== VIDEO TAB ========== -->
+    <div class="tab-panel" id="tab-video">
+      <div class="upload-area" id="video-drop">
+        <div class="upload-icon">🎬</div>
+        <h3>Upload a Video Clip</h3>
+        <p>MP4, AVI, MOV · Recommended: under 30 seconds</p>
+        <p id="video-preview" class="file-name"></p>
+        <input type="file" id="video-input" accept="video/*" />
+      </div>
+      <div style="text-align:center">
+        <button class="btn-primary" id="video-btn" disabled>🔍 Analyze Video</button>
+      </div>
+      <div class="loading" id="video-loading">
+        <div class="spinner"></div>Processing video frames...
+      </div>
+      <div class="result-area" id="video-result">
+        <h3 class="result-title">📊 Video Analysis Summary</h3>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-val" id="stat-frames">—</div>
+            <div class="stat-label">Total Frames</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val" id="stat-total">—</div>
+            <div class="stat-label">Detections</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val fire-val" id="stat-fire">—</div>
+            <div class="stat-label">🔥 Fire</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val smoke-val" id="stat-smoke">—</div>
+            <div class="stat-label">💨 Smoke</div>
+          </div>
+          <div class="stat-box full-span">
+            <div class="stat-val" id="stat-conf">—</div>
+            <div class="stat-label">Avg Confidence</div>
+          </div>
+        </div>
+        <div style="text-align:center;margin-top:20px">
+          <a id="video-download" href="/get_video" download="fire_detected.mp4" class="btn-primary"
+            style="display:none;text-decoration:none">⬇️ Download Annotated Video</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== SETTINGS TAB ========== -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>🎯 Detection Confidence</h3>
+          <p class="setting-desc">Minimum confidence to count as a detection. Lower = more sensitive.</p>
+          <div class="slider-wrap">
+            <input type="range" id="conf-slider" min="0.1" max="0.9" step="0.05" value="0.35" />
+            <span id="conf-val">0.35</span>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>⏱️ Alert Trigger Time</h3>
+          <p class="setting-desc">Seconds of continuous detection required to trigger TRUE FIRE alert.</p>
+          <div class="slider-wrap">
+            <input type="range" id="alert-slider" min="3" max="60" step="1" value="10" />
+            <span id="alert-val">10s</span>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>📷 Camera Source</h3>
+          <p class="setting-desc">Select which camera to use for live detection.</p>
+          <div class="select-wrap">
+            <select id="camera-select">
+              <option value="0">Camera 0 (Default Webcam)</option>
+              <option value="1">Camera 1</option>
+              <option value="2">Camera 2</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>🔊 Sound Alert</h3>
+          <p class="setting-desc">Play an alarm sound when a TRUE FIRE alert is triggered.</p>
+          <label class="toggle-wrap">
+            <input type="checkbox" id="sound-toggle" checked />
+            <div class="toggle-track">
+              <div class="toggle-thumb"></div>
+            </div>
+            <span>Enable Sound Alert</span>
+          </label>
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:24px">
+        <button class="btn-primary" id="save-settings">💾 Save Settings</button>
+        <div id="settings-saved" class="settings-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/main.js"></script>
+</body>
+
+</html>
