@@ -1058,3 +1058,42 @@ body {
     padding: 14px 16px;
   }
 }
+
+/* ===== CAMERA TOGGLE BUTTON ===== */
+.btn-cam-start {
+  padding: 9px 20px;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: .84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+  font-family: 'Inter', sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 0 12px rgba(34, 197, 94, .25);
+}
+
+.btn-cam-start:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 20px rgba(34, 197, 94, .4);
+}
+
+.btn-cam-start:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-cam-start.btn-cam-stop {
+  background: linear-gradient(135deg, #64748b, #475569);
+  box-shadow: 0 0 12px rgba(100, 116, 139, .2);
+}
+
+.btn-cam-start.btn-cam-stop:hover {
+  box-shadow: 0 0 18px rgba(239, 68, 68, .3);
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}

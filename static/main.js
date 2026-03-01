@@ -1,5 +1,52 @@
 // ===== FIRE DETECTION DASHBOARD — ENHANCED JS =====
 
+// ---- Camera Toggle ----
+let cameraRunning = false;
+
+async function toggleCamera() {
+  const btn = document.getElementById('cam-toggle-btn');
+  const feed = document.getElementById('live-feed');
+  const placeholder = document.getElementById('cam-placeholder');
+  const dot = document.getElementById('live-dot');
+  const statusTxt = document.getElementById('live-status-text');
+  const snapBtn = document.getElementById('snap-btn');
+
+  btn.disabled = true;
+
+  if (!cameraRunning) {
+    // --- START ---
+    const res = await fetch('/start_camera', { method: 'POST' }).then(r => r.json()).catch(() => null);
+    if (res && res.ok) {
+      cameraRunning = true;
+      feed.src = '/video_feed';
+      feed.style.display = 'block';
+      placeholder.style.display = 'none';
+      btn.textContent = '⏹ Stop Camera';
+      btn.classList.add('btn-cam-stop');
+      dot.style.background = '#ef4444';   // red = live
+      statusTxt.textContent = 'LIVE';
+      statusTxt.style.color = '#ef4444';
+      snapBtn.disabled = false;
+    }
+  } else {
+    // --- STOP ---
+    feed.src = '';   // disconnect the MJPEG stream
+    feed.style.display = 'none';
+    placeholder.style.display = 'flex';
+    const res = await fetch('/stop_camera', { method: 'POST' }).then(r => r.json()).catch(() => null);
+    cameraRunning = false;
+    btn.textContent = '▶ Start Camera';
+    btn.classList.remove('btn-cam-stop');
+    dot.style.background = '#555';        // grey = off
+    statusTxt.textContent = 'CAMERA OFF';
+    statusTxt.style.color = '#888';
+    snapBtn.disabled = true;
+    document.getElementById('snap-result').textContent = '';
+  }
+
+  btn.disabled = false;
+}
+
 // ---- Sound Alert (Web Audio API) ----
 let soundEnabled = true;
 let alarmPlaying = false;
@@ -306,7 +353,49 @@ fetch('/get_settings').then(r => r.json()).then(s => {
   confSlider.value = s.conf; document.getElementById('conf-val').textContent = s.conf;
   alertSlider.value = s.alert_seconds; document.getElementById('alert-val').textContent = s.alert_seconds + 's';
   document.getElementById('camera-select').value = s.camera_id;
+  // Sync model selector
+  if (s.active_model) {
+    document.getElementById('model-select').value = s.active_model;
+  }
+  if (s.model_label) {
+    document.getElementById('header-model-badge').textContent = 'Model: ' + s.model_label;
+  }
 }).catch(() => { });
+
+// ---- Model Switcher ----
+const modelSelect = document.getElementById('model-select');
+const modelStatus = document.getElementById('model-switch-status');
+
+modelSelect.addEventListener('change', async () => {
+  const key = modelSelect.value;
+  modelStatus.textContent = '⏳ Loading model...';
+  modelStatus.style.color = '#fbbf24';
+  try {
+    const data = await fetch('/switch_model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: key })
+    }).then(r => r.json());
+
+    if (data.ok) {
+      modelStatus.textContent = `✅ Active: ${data.label}`;
+      modelStatus.style.color = '#22c55e';
+      document.getElementById('header-model-badge').textContent = 'Model: ' + data.label;
+      // brief toast in settings-saved div
+      const msg = document.getElementById('settings-saved');
+      msg.textContent = `🤖 Model switched to: ${data.label}`;
+      setTimeout(() => { msg.textContent = ''; }, 3000);
+    } else {
+      modelStatus.textContent = `❌ Error: ${data.error || 'Unknown'}`;
+      modelStatus.style.color = '#ef4444';
+    }
+  } catch (e) {
+    modelStatus.textContent = '❌ Network error';
+    modelStatus.style.color = '#ef4444';
+  }
+  setTimeout(() => { modelStatus.textContent = ''; }, 5000);
+});
+
 
 document.getElementById('save-settings').addEventListener('click', async () => {
   const body = {

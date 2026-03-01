@@ -1,6 +1,7 @@
 """
 Fire Detection Flask Web App — Enhanced
 Phase A+B: Log, Alert History, Stats, Snapshots, Charts, Settings
+Multi-model support: Smoke Fire.pt | best.pt | fire.pt
 """
 
 import os, io, csv, time, threading, datetime
@@ -17,15 +18,54 @@ os.makedirs('uploads', exist_ok=True)
 os.makedirs('test_output', exist_ok=True)
 os.makedirs('snapshots', exist_ok=True)
 
-# ---------- Model ----------
-MODEL_PATH = "reference/Smoke Fire.pt"
-model = YOLO(MODEL_PATH)
+# ---------- Model Registry ----------
+MODEL_REGISTRY = {
+    "smoke_fire": {
+        "label":       "Smoke & Fire (YOLOv12)",
+        "path":        "reference/Smoke Fire.pt",
+        "description": "General smoke and fire detection — default model",
+    },
+    "best": {
+        "label":       "Best Weights (Fire-only)",
+        "path":        "reference/best_fixed.pt",
+        "description": "Custom-trained best checkpoint — fire class only",
+    },
+    "fire_only": {
+        "label":       "Fire-Only Model",
+        "path":        "reference/fire_fixed.pt",
+        "description": "Specialised fire-only detection model",
+    },
+    "fire_smoke_best": {
+        "label":       "Fire & Smoke Best (v2)",
+        "path":        "reference/fire_smoke_best.pt",
+        "description": "Smoke + fire detection — 2 classes (best weights)",
+    },
+}
+
+# Active model state — hot-swappable
+model_state = {
+    "key":   "smoke_fire",
+    "model": YOLO(MODEL_REGISTRY["smoke_fire"]["path"]),
+}
+model_switch_lock = threading.Lock()
+
+
+def get_model():
+    """Thread-safe accessor for the current YOLO model."""
+    with model_switch_lock:
+        return model_state["model"]
+
+
+def get_active_key():
+    with model_switch_lock:
+        return model_state["key"]
 
 # ---------- Settings (mutable) ----------
 settings = {
     "conf":           0.35,
     "alert_seconds":  10,
     "camera_id":      0,
+    "active_model":   "smoke_fire",
 }
 settings_lock = threading.Lock()
 
@@ -120,6 +160,14 @@ def add_chart_point(fire_conf, smoke_conf):
 # ---------- Webcam  ----------
 camera = None
 camera_lock = threading.Lock()
+camera_active = {"running": False}
+camera_active_lock = threading.Lock()
+
+# Blank placeholder frame (shown when camera is off)
+import numpy as np
+_BLANK = np.zeros((480, 640, 3), dtype=np.uint8)
+cv2.putText(_BLANK, "Camera Off", (210, 230), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (80, 80, 80), 2)
+cv2.putText(_BLANK, "Press 'Start Camera' to begin", (140, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (60, 60, 60), 1)
 
 
 def get_camera():
@@ -131,28 +179,50 @@ def get_camera():
     return camera
 
 
+def release_camera():
+    global camera
+    with camera_lock:
+        if camera is not None and camera.isOpened():
+            camera.release()
+            camera = None
+
+
 def generate_frames():
-    cap = get_camera()
+    global camera
     prev_cam = settings["camera_id"]
 
     while True:
+        # If camera is off, yield the blank placeholder frame
+        with camera_active_lock:
+            running = camera_active["running"]
+        if not running:
+            _, buf = cv2.imencode('.jpg', _BLANK)
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
+            time.sleep(0.1)
+            continue
+
         # Hot-swap camera if settings changed
         with settings_lock:
             cur_cam = settings["camera_id"]
         if cur_cam != prev_cam:
-            cap.release()
-            cap = cv2.VideoCapture(cur_cam)
+            with camera_lock:
+                if camera:
+                    camera.release()
+                camera = cv2.VideoCapture(cur_cam)
             prev_cam = cur_cam
 
+        cap = get_camera()
         with camera_lock:
             success, frame = cap.read()
         if not success:
+            time.sleep(0.05)
             continue
 
         with settings_lock:
             conf_thr = settings["conf"]
 
-        results = model.predict(frame, conf=conf_thr, verbose=False)
+        results = get_model().predict(frame, conf=conf_thr, verbose=False)
+        mdl = get_model()
         annotated = results[0].plot()
 
         with frame_lock:
@@ -167,7 +237,7 @@ def generate_frames():
         best_fire_conf, best_smoke_conf = 0.0, 0.0
 
         for box in boxes:
-            cn     = model.names[int(box.cls)]
+            cn     = mdl.names[int(box.cls)]
             conf_v = float(box.conf)
             add_detection(cn, conf_v, source="Live Cam")
             if cn == "fire"  and conf_v > best_fire_conf:  best_fire_conf  = conf_v
@@ -207,6 +277,33 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/start_camera', methods=['POST'])
+def start_camera():
+    with camera_active_lock:
+        camera_active["running"] = True
+    return jsonify({"ok": True, "running": True})
+
+
+@app.route('/stop_camera', methods=['POST'])
+def stop_camera():
+    with camera_active_lock:
+        camera_active["running"] = False
+    release_camera()
+    # Reset alert state too — no camera, no active detection
+    with alert_lock:
+        alert_state["active"] = False
+        alert_state["first_detect_time"] = None
+        alert_state["seconds"] = 0
+        alert_state["detected_class"] = None
+    return jsonify({"ok": True, "running": False})
+
+
+@app.route('/camera_status')
+def camera_status():
+    with camera_active_lock:
+        return jsonify({"running": camera_active["running"]})
 
 
 @app.route('/alert_status')
@@ -271,12 +368,13 @@ def snapshot():
         frame = current_frame_holder["frame"]
     if frame is None:
         return jsonify({"error": "No frame available"}), 400
-    results = model.predict(frame, conf=settings["conf"], verbose=False)
+    mdl = get_model()
+    results = mdl.predict(frame, conf=settings["conf"], verbose=False)
     annotated = results[0].plot()
     name = f"snapshots/snap_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     cv2.imwrite(name, annotated)
     return jsonify({"path": name, "detections": [
-        {"cls": model.names[int(b.cls)], "conf": round(float(b.conf)*100,1)}
+        {"cls": mdl.names[int(b.cls)], "conf": round(float(b.conf)*100,1)}
         for b in results[0].boxes
     ]})
 
@@ -290,10 +388,45 @@ def get_snapshot():
 
 
 # --- Settings ---
+@app.route('/get_models')
+def get_models():
+    """Return model registry + currently active model key."""
+    payload = {
+        "active": get_active_key(),
+        "models": [
+            {"key": k, "label": v["label"], "description": v["description"]}
+            for k, v in MODEL_REGISTRY.items()
+        ],
+    }
+    return jsonify(payload)
+
+
+@app.route('/switch_model', methods=['POST'])
+def switch_model():
+    """Hot-swap the active YOLO model. POST {"model": "best"}"""
+    data = request.json or {}
+    key  = data.get("model", "").strip()
+    if key not in MODEL_REGISTRY:
+        return jsonify({"error": f"Unknown model key: {key}", "available": list(MODEL_REGISTRY.keys())}), 400
+    try:
+        new_model = YOLO(MODEL_REGISTRY[key]["path"])
+        with model_switch_lock:
+            model_state["key"]   = key
+            model_state["model"] = new_model
+        with settings_lock:
+            settings["active_model"] = key
+        return jsonify({"ok": True, "active": key, "label": MODEL_REGISTRY[key]["label"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/get_settings')
 def get_settings():
     with settings_lock:
-        return jsonify(dict(settings))
+        d = dict(settings)
+    d["active_model"] = get_active_key()
+    d["model_label"]  = MODEL_REGISTRY[get_active_key()]["label"]
+    return jsonify(d)
 
 
 @app.route('/update_settings', methods=['POST'])
@@ -320,9 +453,10 @@ def upload_image():
     file.save(filepath)
     with settings_lock:
         conf_thr = settings["conf"]
-    results = model.predict(filepath, conf=conf_thr, save=True,
-                            project='test_output', name='image_result', exist_ok=True)
-    detections = [{"class": model.names[int(b.cls)], "confidence": round(float(b.conf)*100,1)}
+    mdl = get_model()
+    results = mdl.predict(filepath, conf=conf_thr, save=True,
+                          project='test_output', name='image_result', exist_ok=True)
+    detections = [{"class": mdl.names[int(b.cls)], "confidence": round(float(b.conf)*100,1)}
                   for b in results[0].boxes]
     for d in detections:
         add_detection(d["class"], d["confidence"]/100, source="Image Upload")
@@ -352,6 +486,7 @@ def upload_video():
     with settings_lock:
         conf_thr = settings["conf"]
 
+    mdl    = get_model()
     cap    = cv2.VideoCapture(filepath)
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -364,10 +499,10 @@ def upload_video():
         ret, frame = cap.read()
         if not ret: break
         fn += 1
-        results  = model.predict(frame, conf=conf_thr, verbose=False)
+        results   = mdl.predict(frame, conf=conf_thr, verbose=False)
         annotated = results[0].plot()
         for b in results[0].boxes:
-            cn = model.names[int(b.cls)]
+            cn = mdl.names[int(b.cls)]
             cv_val = float(b.conf)
             log.append({"frame": fn, "class": cn, "confidence": round(cv_val*100,1)})
             add_detection(cn, cv_val, source="Video Upload")
